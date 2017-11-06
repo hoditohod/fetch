@@ -1,0 +1,303 @@
+#!/bin/sh
+
+## Fetch is a very simple package manager for Debian and derivatives.
+## Usage:
+##
+##   fetch [command] [options] package1 package2 ...
+##
+## Commands:
+##   install     Install (unpack) selected packages
+##   update      Download package lists
+##   bootstrap   Create a busybox root filesystem from scratch
+##   clean       Remove all downloaded data
+##
+## Options:
+##   --root      Directory of the root filesystem (default: /)
+##   --config    Provide a repo config for bootstrapping
+
+
+###
+# Defaults & constants 
+###
+
+ROOT=/
+VARDIR=var/fetch
+DEBDIR=var/fetch/deb
+TMPDIR=tmp/fetch
+ETCDIR=etc/fetch
+BINDIR=bin
+
+CONFIGFILE=${ETCDIR}/repos.lst
+INSTALLEDFILE=${VARDIR}/installed.lst
+PACKAGESFILE=${VARDIR}/Packages
+PKGLIST=
+BOOTSTRAPCONFIG=
+MASKLIST=awk,base-files,debianutils,multiarch-support,dpkg,debconf
+
+
+
+###
+# Commandline handling 
+###
+
+if [ $# -ge 1 ]; then
+    COMMAND=$1
+    shift
+else
+    echo "Command not specified! (--help)"
+    exit 1    
+fi
+
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --root)
+        ROOT=$2
+        shift
+        ;;
+
+        --config)
+        BOOTSTRAPCONFIG=$2
+        shift
+        ;;
+        
+        --help)
+        grep "^## " fetch | cut -b4-
+        exit
+        ;;
+        
+        --mask)
+        MASKLIST=$2
+        shift
+        ;;
+        
+        *)
+        PKGLIST="$PKGLIST $1"
+
+    esac
+    shift
+done
+
+
+#TODO remove
+#echo $PKGLIST
+
+
+###
+# Process options 
+###
+
+# get an absolute path for the scripts
+DEPEND=$(readlink -f $(dirname $0)/depend.awk)
+FETCH=$(readlink -f $0)
+
+# get rootfs absolute path
+mkdir -p ${ROOT}
+ROOT=$(readlink -f $ROOT)
+
+# make config absolute
+BOOTSTRAPCONFIG=$(readlink -f "$BOOTSTRAPCONFIG")
+
+# make everything else absolute
+VARDIR=${ROOT}/${VARDIR}
+DEBDIR=${ROOT}/${DEBDIR}
+TMPDIR=${ROOT}/${TMPDIR}
+ETCDIR=${ROOT}/${ETCDIR}
+BINDIR=${ROOT}/${BINDIR}
+
+CONFIGFILE=${ROOT}/${CONFIGFILE}
+INSTALLEDFILE=${ROOT}/${INSTALLEDFILE}
+PACKAGESFILE=${ROOT}/${PACKAGESFILE}
+
+
+# Download all Packages files in TMPDIR and concatenate them with Repo info added into 'Packages'
+getPackagesList() {
+    local REPO DISTRIB COMP ARCH FILENAME
+    
+    if [ ! -r $1 ]; then
+        echo "Config not readable!"
+        exit 1
+    fi
+        
+    echo "Updating ${PACKAGESFILE} using $1"
+    
+    rm -f ${PACKAGESFILE}
+    touch ${PACKAGESFILE}
+    
+    while read REPO DISTRIB COMP ARCH FILENAME; do
+        # filter comment lines starting with hashmark
+        if [ "${REPO}" != "${REPO#\#}" ]; then
+            continue
+        fi
+        
+        # get Packages file
+        wget ${REPO}/dists/${DISTRIB}/${COMP}/${ARCH}/${FILENAME} -O ${TMPDIR}/$FILENAME
+        # TODO die if download fails
+        
+        # add source info 
+        echo                       >> ${PACKAGESFILE}
+        echo "Repo: ${REPO}"       >> ${PACKAGESFILE}
+        echo "Distrib: ${DISTRIB}" >> ${PACKAGESFILE}
+        echo "Comp: ${COMP}"       >> ${PACKAGESFILE}
+        echo                       >> ${PACKAGESFILE}
+        
+        # add package list
+        # TODO: extension based uncompress
+        xzcat ${TMPDIR}/${FILENAME} >> ${PACKAGESFILE}
+        rm ${TMPDIR}/${FILENAME}
+    done < $1
+    
+    # cleanup everything else
+    rm -f ${TMPDIR}/*
+}
+
+
+unpackDeb() {
+    echo "Unpacking $1"
+    
+    # dummy 'ar' can only unpack to current workdir
+    cd $TMPDIR
+    
+    #TODO extension based uncompress
+    CONTENTS=$(ar -t $1)
+    DATAFILE=$(echo "$CONTENTS" | grep data)
+    ar -x $1
+    tar xJf ${TMPDIR}/${DATAFILE} -C $ROOT
+    
+    rm -f $CONTENTS
+}
+    
+    
+    
+
+#TODO remove
+REPO=http://mirrors.kernel.org/ubuntu/
+
+
+# arg: comma separated list of required packages
+installDebs() {
+    local INSTALL INSTALLED INSTALLING URL FILENAME
+
+    
+    INSTALLED=$(awk 'BEGIN { FS=","; ORS="," } {print $1}' ${INSTALLEDFILE})
+    
+    # call the dependency script to determine packages to install
+    #TODO handle failure
+    INSTALL=$(cat ${PACKAGESFILE} | ${DEPEND} -v install=${1} -v installed=${INSTALLED%,} -v mask=${MASKLIST})
+    
+    #echo "$INSTALL"
+    
+    INSTALLING=$(echo "$INSTALL" | awk 'BEGIN { FS=","; ORS="," } {print $1}')
+
+
+    # Notify the user (strip trailing commas)
+    echo "Requested:  $1"
+    echo "Installed:  ${INSTALLED%,}"
+    echo "Masked:     ${MASKLIST}"
+    echo "Installing: ${INSTALLING%,}"
+    echo
+
+    #return 0
+
+    sleep 3
+    
+    
+    for i in ${INSTALL}; do
+        URL="${REPO}$(echo $i | cut -d, -f2)"
+        FILENAME="${DEBDIR}/$(echo $i | cut -d, -f1).deb"
+        #echo url $URL filename $FILENAME
+        
+        # download, unpack, delete
+        # TODO: die if download fails
+        wget $URL -O $FILENAME
+        unpackDeb $FILENAME
+        rm -f $FILENAME
+    done
+    
+    echo "$INSTALL" >> ${INSTALLEDFILE}
+}
+
+
+cmd_bootstrap() {
+    # check configuration
+    if [ "$ROOT" = "/" ]; then
+        echo "Target root shouldn't be '/'! (--root)"
+        exit 1
+    fi
+    
+    if [ ! "$BOOTSTRAPCONFIG" ]; then
+        echo "Config not specified! (--config)"
+        exit 1
+    fi
+    
+    # create some dirs/files
+    mkdir -p ${VARDIR} ${TMPDIR} ${DEBDIR} ${ETCDIR} ${BINDIR} 
+    touch ${INSTALLEDFILE}
+
+    # download package list
+    getPackagesList $BOOTSTRAPCONFIG
+    
+    # add busybox to the package list
+    PKGLIST="$PKGLIST busybox"
+    PKGLIST=$(echo $PKGLIST | tr ' ' ,)
+
+    # do the heavy lifting    
+    installDebs busybox
+    
+    # copy fetch into target root
+    cp ${FETCH} ${BINDIR}/fetch
+    cp ${DEPEND} ${BINDIR}/depend.awk
+    cp ${BOOTSTRAPCONFIG} ${CONFIGFILE}
+    
+    # remove package list
+    cmd_cleanup
+}
+
+
+cmd_install() {
+    if [ ! "$PKGLIST" ]; then
+        echo "No packages specified for install"
+        exit 0
+    fi
+
+    # make package list comma separated
+    PKGLIST=$(echo $PKGLIST | tr ' ' ,)
+    
+    installDebs $PKGLIST
+}
+
+
+cmd_update() {
+    getPackagesList $CONFIGFILE
+}
+
+
+cmd_cleanup() {
+    rm -f ${PACKAGESFILE}
+    rm -f ${DEBDIR}/*
+}
+
+
+
+case $COMMAND in
+    bootstrap)
+    cmd_bootstrap
+    ;;
+    
+    install)
+    cmd_install
+    ;;
+    
+    update)
+    cmd_update
+    ;;
+    
+    clean)
+    cmd_cleanup
+    ;;
+    
+    *)
+    echo "Unknown command $COMMAND"
+esac
+
+
