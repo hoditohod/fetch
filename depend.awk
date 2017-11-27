@@ -1,13 +1,22 @@
 #!/usr/bin/awk -f
 
 # Terminology:
-# Set: associative array where only the keys matter, values are empty strings
+# Set: an awk associative array where only the keys are used, values are empty strings
+# Map: an awk associative array
 #
+# Commandline params (set with -v)
+# - install: comma separated list of packages to be installed (MANDATORY)
+# - installed: comma separated list of packages already installed (OPTIONAL)
+# - mask: comma separated list of packages that shouldn't be installed (OPTIONAL)
+
 # Globals:
-#  - installSet: set of packages to be installed (cmdline argument)
-#  - toBeInstalled: the above set extended with all the dependencies
-#  - dependencies: associative array; key: package name, value: comma separated dependency list
-#  - filename: associative array; key: package name, value: filename in repo
+# - maskSet: cmdline arg as Set
+# - installSet: cmdline arg as Set
+# - installedSet: cmdline arg as Set
+# - dependencies: Map of package dependencies, key: package name, value: comma separated list of dependencies
+# - filename: Map of package filenames, key: package name, value: filename
+# - provides: Map of package provided virtuals, key: package name, value: comma separated list of provided virt-packages
+# - virtuals: Map of virtuals, key: virt-package name, value: comma-space separated list of real packages providing the virtual in the key
 
 
 # todo:
@@ -28,6 +37,19 @@
 #####################
 
 
+# send debug message to stderr (conditional)
+function log_debug(msg) {
+#    if (debug == 1) {
+    if (1) {
+        print "D " msg > "/dev/stderr"
+    }
+}
+
+# send error msg to stderr
+function log_error(msg) {
+        print "E " msg > "/dev/stderr"
+}
+
 # join a Set into a single comma separated string
 function joinSet(set,    i,ret,sep) {
     ret = sep = ""
@@ -39,7 +61,9 @@ function joinSet(set,    i,ret,sep) {
     return ret
 }
 
-# split a comma separated list into a Set (only adds to the set) -> kikapcsolva, miert kellett egyaltalan?
+# split a comma separated list into a Set, args:
+#   list(in): comma separated list
+#   ret(out): Set containing the list items
 function splitSet(list,ret,    i,tmp) {
     split(list, tmp, ",")
     delete ret
@@ -58,48 +82,42 @@ function appendWithSep(list, item) {
     }
 }
 
-# walk dependecy tree, writes: toBeInstalled, reads: dependencies, maskSet
-function walk(package,    i,tmp) {
-    #print "Processing " package
-
+function walk(package,requiredby,    i,tmp) {
     # skip masked packages (normal or virtual)
     if (package in maskSet) {
-        #print "Masked: " package
         return
     }
 
     # skip already installed packages
     if (package in installedSet) {
-        #print "Already installed: " package
         return
     }
 
     # return if package is already in toBeInstalled (breaks circular dependencies)
     if (package in toBeInstalled) {
-        #print "Already considered for installation " package
         return
     }
 
     if ( !(package in dependencies) ) {
 
-        if ( package in providers ) {
-            print "Ambiguous dependency tree! Required virtual package " package ", provided by: " providers[package]
-            print "Please explicitly select a provider by adding it to the install list"
+        if ( package in virtuals ) {
+            log_error( "Ambiguous dependency tree! Required virtual package " package ", provided by: " virtuals[package] )
+            log_error( "Please explicitly select a provider by adding it to the install list" )
             exit(1)
         } else {
-            print "Unknown package: " package
+            log_error( "Unknown package: " package )
             exit(1)
         }
     }
 
     # add current package to installSet
+    log_debug("Selecting " package " (required by: " requiredby ")" )
     toBeInstalled[package]
 
     # recurse for all dependencies
     splitSet( dependencies[package], tmp )
     for (i in tmp) {
-        #print "do " i " dep of " package
-        walk(i)
+        walk(i, package)
     }
 }
 
@@ -133,8 +151,6 @@ BEGIN {
 
 # match on a dependency tags
 /^Depends:/ || /^Pre-Depends:/  {
-#    print "Dep: " $2
-
     # Split colon separated dependency list
     split($2, deps, ", ");
 
@@ -142,17 +158,12 @@ BEGIN {
         # split dependecy along space and keep only the first part (strip version info and alternatives)
         split(deps[i], depClean, " ")
 
-#        print depClean[1]
-        # use array as set to remove possible duplicates due to same
-        # dependency in both Depends and Pre-Depends (eg. Package: dpkg)
         packageDepSet[ depClean[1] ]
     }
 }
 
 # match on provided virtual packages
 /^Provides:/ {
-#    print "Provides: " $2
-
     # Split colon separated virtual package list
     split($2, vpkg, ", ");
 
@@ -161,9 +172,6 @@ BEGIN {
         # split dependecy along space and keep only the first part (strip version info and alternatives)
         split(vpkg[i], vpkgClean, " ")
 
-#        print vpkgClean[1]
-        # use array as set to remove possible duplicates due to same
-        # dependency in bot Depends and Pre-Depends (eg. Package: dpkg)
         packageProvides[ vpkgClean[1] ]
     }
 }
@@ -177,13 +185,8 @@ BEGIN {
 
         # create a virtual package provider map for user messages
         for (i in packageProvides) {
-            providers[i] = appendWithSep( providers[i], packageName )
+            virtuals[i] = appendWithSep( virtuals[i], packageName )
         }
-
-#        print "P: " packageName
-#        print "D: " dependencies[ packageName ]
-#        print "F: " filename[ packageName ]
-#        print ""
     }
 
     # blank state
@@ -201,18 +204,10 @@ BEGIN {
 
 
 END {
-    #print "end"
-
-#    for (i in providers) {
-#        print i " provided by " providers[i]
-#    }
-
-#    exit(0)
-
 
     # quit if install argument is not present
     if (install == "") {
-        print "Error: install list is missing" > "/dev/stderr"
+        log_error( "Error: install list is missing" )
         exit(1)
     }
 
@@ -225,11 +220,11 @@ END {
     # process installed packages if present (no validity check on items)
     splitSet(installed, installedSet)
     
-    # mark all virtual packages as installed
+    # mark all virtual packages as installed if an already installed package provides them
     for (i in installedSet) {
         splitSet(provides[i], tmp)
         for (j in tmp) {
-            #print "Adding virtual package to installedSet: " j
+            log_debug( "Adding virtual package to installedSet: " j " (provided by installed: " i ")" )
             installedSet[j]
         }
     }
@@ -241,20 +236,22 @@ END {
     
     # add virtual packages provided by the installSet to the maskSet to
     # avoid dependency tracking on them (no validity check on items)
+    # eg: install=bash,gawk (bash depends on awk, which is provided by gawk)
+    # NOTE: the item could be added to installedSet instead of maskSet, or a new virtInstallSet
+    # The point is to break the processing of this virtual dependency in walk()
     for (i in installSet) {
         splitSet(provides[i], tmp)
         for (j in tmp) {
-            #print "Adding virtual package to maskSet: " j
+            log_debug( "Adding virtual package to maskSet: " j " (provided by install req: " i ")" )
             maskSet[j]
         }
     }
     
     # walk dependecy tree (die on invalid items)
     for (i in installSet) {
-        walk(i)
+        walk(i, "<user>")
     }
 
-    #print "Minimal connected set:"
     OFS=","
     for (i in toBeInstalled) {
         print i, filename[i]

@@ -1,7 +1,7 @@
 
 # TODO
 - [ ] Move bootstrap funtionality to a separate script
-- [ ] Add stderr logging to the `depend` script
+- [x] Add stderr logging to the `depend` script
 - [ ] Add support for package versioning (needed for updates/security updates)
 - [ ] Add support for package signature check (secure debian)
 - [ ] Add repo configs for Debian Jessie and Stretch
