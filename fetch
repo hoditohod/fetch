@@ -112,7 +112,7 @@ PACKAGESFILE=${ROOT}/${PACKAGESFILE}
 
 # Download all Packages files in TMPDIR and concatenate them with Repo info added into 'Packages'
 getPackagesList() {
-    local REPO DISTRIB COMP ARCH FILENAME
+    local REPO DISTRIB COMP ARCH FILENAME PACKAGESURL
     
     if [ ! -r $1 ]; then
         echo "Config not readable!"
@@ -138,8 +138,14 @@ getPackagesList() {
         # echo "Processing package list: ${REPO} ${DISTRIB} ${COMP} ${ARCH} ${FILENAME}"
 
         # get Packages file
-        wget ${REPO}/dists/${DISTRIB}/${COMP}/${ARCH}/${FILENAME} -O ${TMPDIR}/$FILENAME
-        # TODO die if download fails
+        PACKAGESURL="${REPO}/dists/${DISTRIB}/${COMP}/${ARCH}/${FILENAME}"
+        wget ${PACKAGESURL} -O ${TMPDIR}/$FILENAME
+
+        if [ $? -ne 0 ]; then
+            echo "Failed to download Packages file: ${PACKAGESURL}"
+            rm -f ${TMPDIR}/*
+            exit 1
+        fi
         
         # add source info 
         echo                       >> ${PACKAGESFILE}
@@ -149,8 +155,16 @@ getPackagesList() {
         echo                       >> ${PACKAGESFILE}
         
         # add package list
-        # TODO: extension based uncompress
-        xzcat ${TMPDIR}/${FILENAME} >> ${PACKAGESFILE}
+        if [ "${FILENAME%\.xz}" != "${FILENAME}" ]; then
+            xzcat ${TMPDIR}/${FILENAME} >> ${PACKAGESFILE}
+        elif [ "${FILENAME%\.gz}" != "${FILENAME}" ]; then
+            zcat ${TMPDIR}/${FILENAME} >> ${PACKAGESFILE}
+        else
+            echo "Can't unpack Packages file: ${FILENAME}"
+            rm -f ${TMPDIR}/*
+            exit 1
+        fi
+
         rm ${TMPDIR}/${FILENAME}
     done < $1
     
