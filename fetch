@@ -130,6 +130,13 @@ getPackagesList() {
             continue
         fi
         
+        # filter blank lines
+        if [ "${REPO}" = "" ]; then
+            continue
+        fi
+
+        # echo "Processing package list: ${REPO} ${DISTRIB} ${COMP} ${ARCH} ${FILENAME}"
+
         # get Packages file
         wget ${REPO}/dists/${DISTRIB}/${COMP}/${ARCH}/${FILENAME} -O ${TMPDIR}/$FILENAME
         # TODO die if download fails
