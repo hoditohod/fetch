@@ -12,5 +12,5 @@
 - [ ] Run tests with current production containers
 - [ ] Figure out how to handle mask list? (hardcoded at bootstrap?)
 - [ ] Download only mode
-- [ ] Root owner in tar files: fakeroot 
-- [ ] do busybox --install before taring (fakechroot)
+- [x] Root owner in tar files (fakeroot)
+- [x] do busybox --install before taring (fakechroot)

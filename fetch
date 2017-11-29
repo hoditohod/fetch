@@ -91,9 +91,10 @@ done
 DEPEND=$(readlink -f $(dirname $0)/depend.awk)
 FETCH=$(readlink -f $0)
 
-# get rootfs absolute path
+# get rootfs and current dir absolute path
 mkdir -p ${ROOT}
 ROOT=$(readlink -f $ROOT)
+CURDIR=$(pwd)
 
 # make config absolute
 BOOTSTRAPCONFIG=$(readlink -f "$BOOTSTRAPCONFIG")
@@ -143,7 +144,7 @@ getPackagesList() {
 
         if [ $? -ne 0 ]; then
             echo "Failed to download Packages file: ${PACKAGESURL}"
-            rm -f ${TMPDIR}/*
+            rm -f ${PACKAGESFILE} ${TMPDIR}/*
             exit 1
         fi
         
@@ -161,7 +162,7 @@ getPackagesList() {
             zcat ${TMPDIR}/${FILENAME} >> ${PACKAGESFILE}
         else
             echo "Can't unpack Packages file: ${FILENAME}"
-            rm -f ${TMPDIR}/*
+            rm -f ${PACKAGESFILE} ${TMPDIR}/*
             exit 1
         fi
 
@@ -240,38 +241,54 @@ installDebs() {
 
 
 cmd_bootstrap() {
+    local PREP_CMD
+
     # check configuration
     if [ "$ROOT" = "/" ]; then
         echo "Target root shouldn't be '/'! (--root)"
         exit 1
     fi
-    
+
     if [ ! "$BOOTSTRAPCONFIG" ]; then
         echo "Config not specified! (--config)"
         exit 1
     fi
-    
+
     # create some dirs/files
-    mkdir -p ${VARDIR} ${TMPDIR} ${DEBDIR} ${ETCDIR} ${BINDIR} 
+    mkdir -p ${VARDIR} ${TMPDIR} ${DEBDIR} ${ETCDIR} ${BINDIR} ${ROOT}/usr/bin ${ROOT}/sbin ${ROOT}/usr/sbin
     touch ${INSTALLEDFILE}
 
     # download package list
     getPackagesList $BOOTSTRAPCONFIG
-    
+
     # add busybox to the package list
     PKGLIST="$PKGLIST busybox"
     PKGLIST=$(echo $PKGLIST | tr ' ' ,)
 
     # do the heavy lifting    
-    installDebs busybox
-    
+    installDebs ${PKGLIST}
+
     # copy fetch into target root
     cp ${FETCH} ${BINDIR}/fetch
     cp ${DEPEND} ${BINDIR}/depend.awk
     cp ${BOOTSTRAPCONFIG} ${CONFIGFILE}
-    
+
     # remove package list
     cmd_cleanup
+
+    # Preparing to create the archive
+    # busybox install
+    PREP_CMD="/bin/busybox --install -s; echo 'BusyBox installed!';"
+
+    # modifing owner and groups to root
+    PREP_CMD=${PREP_CMD}"chown -R 0:0 /;"
+
+    # creating tar archive
+    PREP_CMD=${PREP_CMD}"tar -cf hekkpack.tar .; echo 'Package created!';"
+    fakeroot-ng chroot ${ROOT} /bin/busybox sh -c "$PREP_CMD"
+
+    mv ${ROOT}/hekkpack.tar ${CURDIR}/hekkpack.tar
+    rm -rf ${ROOT}
 }
 
 
