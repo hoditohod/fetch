@@ -2,7 +2,7 @@
 # TODO
 - [ ] Move bootstrap funtionality to a separate script
 - [x] Add stderr logging to the `depend` script
-- [ ] Add support for package versioning (needed for updates/security updates)
+- [x] Add support for parsing updates/security package lists
 - [ ] Add support for package signature check (secure debian)
 - [ ] Add repo configs for Debian Jessie and Stretch
 - [ ] Add check target (checks if newer versions available than installed)
@@ -14,3 +14,10 @@
 - [ ] Download only mode
 - [x] Root owner in tar files (fakeroot)
 - [x] do busybox --install before taring (fakechroot)
+- [ ] --help doesn't work
+- [ ] group downloads and unpacks
+- [ ] check if deb is already downloaded
+- [ ] die if awk fails
+- [ ] verify package version contraints when creating the install list
+- [ ] die if deb downloading fails
+- [ ] reuse already downloaded packages

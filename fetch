@@ -258,6 +258,11 @@ cmd_bootstrap() {
     mkdir -p ${VARDIR} ${TMPDIR} ${DEBDIR} ${ETCDIR} ${BINDIR} ${ROOT}/usr/bin ${ROOT}/sbin ${ROOT}/usr/sbin
     touch ${INSTALLEDFILE}
 
+    # 'create' root user
+    echo "root:x:0:0:root:/root:/bin/sh" > ${ROOT}/etc/passwd
+    echo "root:*:17445:0:99999:7:::"     > ${ROOT}/etc/shadow
+    echo "root:x:0:"                     > ${ROOT}/etc/group
+
     # download package list
     getPackagesList $BOOTSTRAPCONFIG
 
@@ -289,6 +294,8 @@ cmd_bootstrap() {
 
     mv ${ROOT}/hekkpack.tar ${CURDIR}/hekkpack.tar
     rm -rf ${ROOT}
+
+    echo "Import the tar into Docker with: docker import hekkpack.tar <tag>"
 }
 
 
@@ -310,7 +317,7 @@ cmd_update() {
 }
 
 
-cmd_cleanup() {
+cmd_clean() {
     rm -f ${PACKAGESFILE}
     rm -f ${DEBDIR}/*
 }
@@ -331,7 +338,7 @@ case $COMMAND in
     ;;
     
     clean)
-    cmd_cleanup
+    cmd_clean
     ;;
     
     *)

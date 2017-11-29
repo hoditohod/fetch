@@ -475,7 +475,7 @@ BEGIN {
 
         if ((packageName in latestVersion) && (compareVer(latestVersion[packageName], packageVersion) != -1)) {
             # security and updates may have older or same versions
-            log_debug("Skipping " packageName " update, old: " latestVersion[packageName] " new: " packageVersion)
+            #log_debug("Skipping " packageName " update, old: " latestVersion[packageName] " new: " packageVersion)
         } else {
             # add package to db or update to newer version
             dependencies[packageName] = joinSet(packageDepSet)
