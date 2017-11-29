@@ -19,8 +19,8 @@
 # - virtuals: Map of virtuals, key: virt-package name, value: comma-space separated list of real packages providing the virtual in the key
 
 
-# Some awk WTF's I always forget
-# - there are local variables at block scope, only function scope; they must be present in the argument list
+# Some AWK WTF's I always forget...
+# - there aren't local variables at block scope, only function scope; they must be present in the argument list
 # - arrays passed by reference, other types by value (passing semantics determined runtime)
 
 
@@ -60,8 +60,17 @@ function log_debug(msg) {
 
 # send error msg to stderr
 function log_error(msg) {
-        print "ERR " msg > "/dev/stderr"
+    print "ERR " msg > "/dev/stderr"
 }
+
+
+# log message from the version parser/comparator
+function log_cmp(msg) {
+    if (0) {
+        print "CMP " msg > "/dev/stderr"
+    }
+}
+
 
 # join a Set into a single comma separated string
 function joinSet(set,    i,ret,sep) {
@@ -183,8 +192,6 @@ function ord(c) {
         exit(1)
     }
 
-    #print "Ord " c " " ordTable[c]
-
     return ordTable[c]
 }
 
@@ -217,11 +224,11 @@ function modifiedLexicalSort(str1, str2,     i, len, c1, c2) {
     # get the char past the common length
     if (length(str1) > length(str2)) {
         c1 = substr(str1, len+1, 1)
-        #print "past1: " c1
+        log_cmp( "past1: " c1 )
         return (c1 == "~") ? -1 : 1;
     } else {
         c2 = substr(str2, len+1, 1)
-        #print "past2: " c2
+        log_cmp( "past2: " c2 )
         return (c2 == "~") ? 1 : -1;
     }
 }
@@ -249,9 +256,9 @@ function splitVer(verStr, ret,     i) {
         ret["debian"] = substr(verStr, i+1)
     }
 
-    #print "Epoch: " ret["epoch"]
-    #print "Upstream: " ret["upstream"]
-    #print "Debian: " ret["debian"]
+    log_cmp( "Epoch: " ret["epoch"] )
+    log_cmp( "Upstream: " ret["upstream"] )
+    log_cmp( "Debian: " ret["debian"] )
 }
 
 function compareSectionAlpha(ver1, ver2,    sub1, sub2, r) {
@@ -259,15 +266,15 @@ function compareSectionAlpha(ver1, ver2,    sub1, sub2, r) {
         return 0
     }
 
-    match(ver1, /^[a-zA-Z+~\.]+/)
+    match(ver1, /^[a-zA-Z+~\.\-]+/)
     sub1 = substr(ver1, 1, RLENGTH)
     ver1 = substr(ver1, RLENGTH+1)
-    #print("amatch1 " sub1 " " ver1)
+    log_cmp( "alpMatch1 " sub1 " " ver1 )
 
-    match(ver2, /^[a-zA-Z+~\.]+/)
+    match(ver2, /^[a-zA-Z+~\.\-]+/)
     sub2 = substr(ver2, 1, RLENGTH)
     ver2 = substr(ver2, RLENGTH+1)
-    #print("amatch2 " sub2 " " ver2)
+    log_cmp( "alpMatch2 " sub2 " " ver2 )
 
     r = modifiedLexicalSort(sub1, sub2)
     if (r != 0) {
@@ -290,7 +297,7 @@ function compareSectionNum(ver1, ver2,    num1, num2) {
     # add zero to force conversion to number type
     num1 = substr(ver1, 1, RLENGTH) + 0
     ver1 = substr(ver1, RLENGTH+1)
-    #print("nmatch1 " num1 " " ver1)
+    log_cmp( "numMmatch1 " num1 " " ver1 )
 
     if (match(ver2, /^[0-9]+/) == 0) {
         log_error("Numeric block expected in: " ver2)
@@ -299,7 +306,7 @@ function compareSectionNum(ver1, ver2,    num1, num2) {
     # add zero to force conversion to number type
     num2 = substr(ver2, 1, RLENGTH) + 0
     ver2 = substr(ver2, RLENGTH+1)
-    #print("nmatch2 " num2 " " ver2)
+    log_cmp( "numMmatch2 " num2 " " ver2 )
 
     if ( num1 > num2 ) {
         return 1;
@@ -313,6 +320,8 @@ function compareSectionNum(ver1, ver2,    num1, num2) {
 
 
 function compareVer(ver1, ver2,    verArr1, verArr2, r) {
+    log_cmp( "CompareVer " ver1 " " ver2 )
+
     splitVer(ver1, verArr1);
     splitVer(ver2, verArr2);
 
@@ -380,6 +389,10 @@ function testVerCompare() {
     print compareVer("1:1.0-2", "1:1.0-1") == 1
     print compareVer("1:1.1-1", "1:1.0-2") == 1
 
+    # salad
+    print compareVer("1:1.6.2-0ubuntu14", "1:1.6.2-0ubuntu14.2") == -1
+    print compareVer("2.0.21-stable-2", "2.0.21-stable-2ubuntu0.16.04.1") == -1
+
     exit(0)
 }
 
@@ -439,26 +452,50 @@ BEGIN {
     }
 }
 
+/^Version:/ {
+    packageVersion = $2
+}
+
+/^Repo:/ {
+    packageRepo = $2
+}
+
+/^Distrib:/ {
+    packageDistrib = $2
+}
+
+/^Comp:/ {
+    packageComp = $2
+}
+
+
 # match on a package separator newline
 /^$/ {
     if (packageName != "") {
-        dependencies[packageName] = joinSet(packageDepSet)
-        filename[packageName] = packageFile
-        provides[packageName] = joinSet(packageProvides)
 
-        # create a virtual package provider map for user messages
-        for (i in packageProvides) {
-            virtuals[i] = appendWithSep( virtuals[i], packageName )
+        if ((packageName in latestVersion) && (compareVer(latestVersion[packageName], packageVersion) != -1)) {
+            # security and updates may have older or same versions
+            log_debug("Skipping " packageName " update, old: " latestVersion[packageName] " new: " packageVersion)
+        } else {
+            # add package to db or update to newer version
+            dependencies[packageName] = joinSet(packageDepSet)
+            filename[packageName] = packageFile
+            provides[packageName] = joinSet(packageProvides)
+            latestVersion[packageName] = packageVersion
+
+            # create a virtual package provider map for user messages (TODO: added multiple times with update?)
+            for (i in packageProvides) {
+                virtuals[i] = appendWithSep( virtuals[i], packageName )
+            }
         }
     }
 
-    # blank state
+    # blank state (repo/distrib/com are retained)
     delete packageDepSet
     delete packageProvides
-    # mawk doesn't support deleting ordinary variables
-    #delete packageName
-    #delete packageFile
-    
+    packageName = ""
+    packageFile = ""
+    packageVersion = ""
 }
 
 #########################
@@ -467,8 +504,8 @@ BEGIN {
 
 
 END {
-
-    testVerCompare()
+    #testVerCompare()
+    
 
     # quit if install argument is not present
     if (install == "") {
